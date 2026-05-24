@@ -17,6 +17,7 @@ export interface Streaks {
   reading: number;
   business: number;
   discipline: number;
+  deen: number;
   lastLogged: Record<string, string>;
 }
 
@@ -130,6 +131,42 @@ export interface BusinessTask {
   duration: number;
   impact: 'low' | 'medium' | 'high';
   notes: string;
+  xpGained: number;
+}
+
+// Deen
+export type SalahName = 'Fajr' | 'Dhuhr' | 'Asr' | 'Maghrib' | 'Isha';
+export type SalahStatus = 'on-time' | 'late' | 'missed';
+
+export interface SalahEntry {
+  id: string;
+  date: string;
+  prayer: SalahName;
+  status: SalahStatus;
+  xpGained: number;
+}
+
+export interface QuranEntry {
+  id: string;
+  date: string;
+  pages: number;
+  surah: string;
+  notes: string;
+  xpGained: number;
+}
+
+export interface DhikrEntry {
+  id: string;
+  date: string;
+  type: 'morning' | 'evening' | 'custom';
+  xpGained: number;
+}
+
+export interface FastEntry {
+  id: string;
+  date: string;
+  type: 'monday' | 'thursday' | 'ayyam-beedh' | 'other';
+  completed: boolean;
   xpGained: number;
 }
 

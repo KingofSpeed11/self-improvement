@@ -4,7 +4,9 @@ import { format, subDays, startOfWeek } from 'date-fns';
 import type {
   UserProfile, Streaks, SoccerSession, WeakFootSession, SpeedTest, HighlightVideo,
   WorkoutSession, SleepEntry, StudySession, ReadingEntry, Book, BusinessTask,
-  DisciplineGoal, DisciplineEntry, RoutineEntry, Quest, Achievement, SkillNode, WeeklySnapshot, Settings
+  DisciplineGoal, DisciplineEntry, RoutineEntry,
+  SalahName, SalahStatus, SalahEntry, QuranEntry, DhikrEntry, FastEntry,
+  Quest, Achievement, SkillNode, WeeklySnapshot, Settings
 } from '../types';
 import { applyXP, calculateXPForLevel, getRankForLevel } from '../utils/xpSystem';
 import { generateQuests, isQuestExpired } from '../utils/questSystem';
@@ -20,6 +22,7 @@ interface GameState {
   reading: { entries: ReadingEntry[]; books: Book[] };
   business: { tasks: BusinessTask[] };
   discipline: { goals: DisciplineGoal[]; entries: DisciplineEntry[] };
+  deen: { salah: SalahEntry[]; quran: QuranEntry[]; dhikr: DhikrEntry[]; fasts: FastEntry[] };
   routine: { log: RoutineEntry[] };
   quests: Quest[];
   achievements: Achievement[];
@@ -56,6 +59,12 @@ interface GameState {
 
   // Business
   addBusinessTask: (t: Omit<BusinessTask, 'id' | 'xpGained'>) => void;
+
+  // Deen
+  logSalah: (prayer: SalahName, status: SalahStatus) => void;
+  logQuranPages: (pages: number, surah: string, notes: string) => void;
+  logDhikr: (type: 'morning' | 'evening' | 'custom') => void;
+  logFast: (date: string, type: FastEntry['type']) => void;
 
   // Routine
   logRoutineBlock: (blockId: string, xp: number) => void;
@@ -137,7 +146,7 @@ export const useGameStore = create<GameState>()(
       },
       streaks: {
         soccer: 0, fitness: 0, sleep: 0, school: 0,
-        reading: 0, business: 0, discipline: 0,
+        reading: 0, business: 0, discipline: 0, deen: 0,
         lastLogged: {},
       },
       soccer: { sessions: [], weakFoot: [], speedTests: [], highlights: [] },
@@ -147,6 +156,7 @@ export const useGameStore = create<GameState>()(
       reading: { entries: [], books: [] },
       business: { tasks: [] },
       discipline: { goals: DEFAULT_DISCIPLINE_GOALS, entries: [] },
+      deen: { salah: [], quran: [], dhikr: [], fasts: [] },
       routine: { log: [] },
       quests: generateQuests(new Date()),
       achievements: ALL_ACHIEVEMENTS,
@@ -317,6 +327,90 @@ export const useGameStore = create<GameState>()(
         discipline: { ...state.discipline, goals: DEFAULT_DISCIPLINE_GOALS },
       })),
 
+      logSalah: (prayer, status) => set(state => {
+        const today = format(new Date(), 'yyyy-MM-dd');
+        // Remove existing entry for same prayer+date so user can update
+        const filtered = state.deen.salah.filter(s => !(s.date === today && s.prayer === prayer));
+        const xp = status === 'on-time' ? 30 : status === 'late' ? 10 : 0;
+        const entry: SalahEntry = { id: uid(), date: today, prayer, status, xpGained: xp };
+        const newSalah = [...filtered, entry];
+
+        // Bonus +50 XP if all 5 prayers logged on time today
+        const todayEntries = newSalah.filter(s => s.date === today);
+        const PRAYERS: SalahName[] = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+        const allOnTime = PRAYERS.every(p => todayEntries.find(s => s.prayer === p && s.status === 'on-time'));
+        const bonusXP = allOnTime ? 50 : 0;
+        const allLogged = PRAYERS.every(p => todayEntries.find(s => s.prayer === p));
+
+        let newProfile = xp > 0 ? applyXP(state.profile, xp) : state.profile;
+        if (bonusXP > 0) newProfile = applyXP(newProfile, bonusXP);
+        const leveled = newProfile.level > state.profile.level;
+        const newStreaks = allLogged ? updateStreak(state.streaks, 'deen') : state.streaks;
+
+        const notifs = [
+          ...(xp > 0 ? [{ id: uid(), message: `+${xp + bonusXP} XP — ${prayer} logged${allOnTime ? ' 🏆 All 5 on time!' : ''}`, type: 'xp' as const, timestamp: Date.now() }] : []),
+          ...(leveled ? [{ id: uid(), message: `LEVEL UP! You're now Level ${newProfile.level}!`, type: 'level' as const, timestamp: Date.now() }] : []),
+        ];
+        return {
+          deen: { ...state.deen, salah: newSalah },
+          profile: newProfile,
+          streaks: newStreaks,
+          notifications: [...state.notifications, ...notifs],
+        };
+      }),
+
+      logQuranPages: (pages, surah, notes) => set(state => {
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const xp = pages * 3;
+        const entry: QuranEntry = { id: uid(), date: today, pages, surah, notes, xpGained: xp };
+        const newProfile = applyXP(state.profile, xp);
+        const leveled = newProfile.level > state.profile.level;
+        const notifs = [
+          { id: uid(), message: `+${xp} XP — ${pages} pages of Quran 📖`, type: 'xp' as const, timestamp: Date.now() },
+          ...(leveled ? [{ id: uid(), message: `LEVEL UP! You're now Level ${newProfile.level}!`, type: 'level' as const, timestamp: Date.now() }] : []),
+        ];
+        return {
+          deen: { ...state.deen, quran: [...state.deen.quran, entry] },
+          profile: newProfile,
+          notifications: [...state.notifications, ...notifs],
+        };
+      }),
+
+      logDhikr: (type) => set(state => {
+        const today = format(new Date(), 'yyyy-MM-dd');
+        if (state.deen.dhikr.some(d => d.date === today && d.type === type)) return state;
+        const xp = type === 'morning' || type === 'evening' ? 20 : 10;
+        const entry: DhikrEntry = { id: uid(), date: today, type, xpGained: xp };
+        const newProfile = applyXP(state.profile, xp);
+        const leveled = newProfile.level > state.profile.level;
+        const notifs = [
+          { id: uid(), message: `+${xp} XP — ${type === 'morning' ? 'Morning' : type === 'evening' ? 'Evening' : 'Custom'} Adhkar ✨`, type: 'xp' as const, timestamp: Date.now() },
+          ...(leveled ? [{ id: uid(), message: `LEVEL UP! You're now Level ${newProfile.level}!`, type: 'level' as const, timestamp: Date.now() }] : []),
+        ];
+        return {
+          deen: { ...state.deen, dhikr: [...state.deen.dhikr, entry] },
+          profile: newProfile,
+          notifications: [...state.notifications, ...notifs],
+        };
+      }),
+
+      logFast: (date, type) => set(state => {
+        if (state.deen.fasts.some(f => f.date === date)) return state;
+        const xp = 50;
+        const entry: FastEntry = { id: uid(), date, type, completed: true, xpGained: xp };
+        const newProfile = applyXP(state.profile, xp);
+        const leveled = newProfile.level > state.profile.level;
+        const notifs = [
+          { id: uid(), message: `+${xp} XP — Sunnah fast completed 🌙`, type: 'xp' as const, timestamp: Date.now() },
+          ...(leveled ? [{ id: uid(), message: `LEVEL UP! You're now Level ${newProfile.level}!`, type: 'level' as const, timestamp: Date.now() }] : []),
+        ];
+        return {
+          deen: { ...state.deen, fasts: [...state.deen.fasts, entry] },
+          profile: newProfile,
+          notifications: [...state.notifications, ...notifs],
+        };
+      }),
+
       logRoutineBlock: (blockId, xp) => set(state => {
         const today = format(new Date(), 'yyyy-MM-dd');
         if (state.routine.log.some(l => l.date === today && l.blockId === blockId)) return state;
@@ -465,14 +559,18 @@ export const useGameStore = create<GameState>()(
     }),
     {
       name: 'levelup-storage',
-      version: 2,
+      version: 3,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 2) {
-          // Replace old generic goals with the personal habit set
           persistedState.discipline = {
             ...(persistedState.discipline ?? { entries: [] }),
             goals: DEFAULT_DISCIPLINE_GOALS,
           };
+        }
+        if (fromVersion < 3) {
+          persistedState.deen = { salah: [], quran: [], dhikr: [], fasts: [] };
+          persistedState.streaks = { ...(persistedState.streaks ?? {}), deen: 0 };
+          persistedState.routine = persistedState.routine ?? { log: [] };
         }
         return persistedState;
       },

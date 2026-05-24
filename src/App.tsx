@@ -88,6 +88,7 @@ export default function App() {
     addBusinessTask, addDisciplineGoal, removeDisciplineGoal,
     resetDisciplineGoals, toggleDisciplineGoal, logDisciplineEntry,
     logRoutineBlock, routine,
+    deen, logSalah, logQuranPages, logDhikr, logFast,
     addWeakFootSession, addSpeedTest,
   } = store;
 
@@ -778,6 +779,16 @@ export default function App() {
           <div className="section-divider" />
 
           {/* ═══════════════════════════════════════════════
+              DEEN
+          ═══════════════════════════════════════════════ */}
+          <section id="deen" className="page-section">
+            <SectionHeader id="deen" icon="🕌" title="Deen" sub="Salah, Quran, Adhkar, and Fasting — the foundation" color="var(--gold)" streak={streaks.deen} />
+            <DeenSection deen={deen} today={today} logSalah={logSalah} logQuranPages={logQuranPages} logDhikr={logDhikr} logFast={logFast} />
+          </section>
+
+          <div className="section-divider" />
+
+          {/* ═══════════════════════════════════════════════
               ANALYTICS
           ═══════════════════════════════════════════════ */}
           <section id="analytics" className="page-section">
@@ -1016,6 +1027,290 @@ function SleepLogForm({ add, afterSubmit }: { add: any; afterSubmit: any }) {
       </div>
       <button type="submit" className="btn btn-primary btn-full">Log Sleep 🌙</button>
     </form>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// DEEN SECTION
+// ═══════════════════════════════════════════════════════
+
+const PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'] as const;
+const PRAYER_ICONS: Record<string, string> = { Fajr: '🌅', Dhuhr: '☀️', Asr: '🌤️', Maghrib: '🌆', Isha: '🌙' };
+const QURAN_TOTAL_PAGES = 604;
+
+function DeenSection({ deen, today, logSalah, logQuranPages, logDhikr, logFast }: any) {
+  const [showQuranLog, setShowQuranLog] = useState(false);
+  const [quranForm, setQuranForm]       = useState({ pages: '', surah: '', notes: '' });
+  const [fastDate, setFastDate]         = useState(today);
+  const [fastType, setFastType]         = useState<'monday' | 'thursday' | 'ayyam-beedh' | 'other'>('monday');
+
+  // ── Today's prayer entries
+  const todaySalah  = deen.salah.filter((s: any) => s.date === today);
+  const getPrayer   = (p: string) => todaySalah.find((s: any) => s.prayer === p);
+  const allOnTime   = PRAYERS.every(p => getPrayer(p)?.status === 'on-time');
+  const prayedCount = PRAYERS.filter(p => getPrayer(p)).length;
+
+  // ── Quran stats
+  const totalPages   = deen.quran.reduce((t: number, q: any) => t + q.pages, 0);
+  const quranPct     = Math.min(100, Math.round((totalPages / QURAN_TOTAL_PAGES) * 100));
+  const juzDone      = Math.floor(totalPages / (QURAN_TOTAL_PAGES / 30));
+  const todayPages   = deen.quran.filter((q: any) => q.date === today).reduce((t: number, q: any) => t + q.pages, 0);
+
+  // ── Adhkar
+  const todayDhikr   = deen.dhikr.filter((d: any) => d.date === today);
+  const hasMorning   = todayDhikr.some((d: any) => d.type === 'morning');
+  const hasEvening   = todayDhikr.some((d: any) => d.type === 'evening');
+
+  // ── Fasts
+  const todayFast    = deen.fasts.find((f: any) => f.date === today);
+  const totalFasts   = deen.fasts.filter((f: any) => f.completed).length;
+
+  // ── 7-day prayer grid
+  const last7 = Array.from({ length: 7 }, (_, i) => {
+    const d = format(subDays(new Date(), 6 - i), 'yyyy-MM-dd');
+    const entries = deen.salah.filter((s: any) => s.date === d);
+    const onTime  = entries.filter((s: any) => s.status === 'on-time').length;
+    return { date: d, label: format(subDays(new Date(), 6 - i), 'EEE'), onTime, logged: entries.length };
+  });
+
+  // ── Deen score (7-day)
+  const last7date = format(subDays(new Date(), 6), 'yyyy-MM-dd');
+  const salahScore = Math.round(
+    (deen.salah.filter((s: any) => s.date >= last7date && s.status === 'on-time').length / (5 * 7)) * 100
+  );
+  const quranDays  = new Set(deen.quran.filter((q: any) => q.date >= last7date).map((q: any) => q.date)).size;
+  const quranScore = Math.round((quranDays / 7) * 100);
+  const adhkarDays = (() => {
+    const byDay: Record<string, Set<string>> = {};
+    deen.dhikr.filter((d: any) => d.date >= last7date).forEach((d: any) => {
+      byDay[d.date] = byDay[d.date] ?? new Set();
+      byDay[d.date].add(d.type);
+    });
+    return Object.values(byDay).filter(s => s.has('morning') && s.has('evening')).length;
+  })();
+  const adhkarScore = Math.round((adhkarDays / 7) * 100);
+  const deenScore   = Math.round(salahScore * 0.5 + quranScore * 0.3 + adhkarScore * 0.2);
+
+  function submitQuran(e: React.FormEvent) {
+    e.preventDefault();
+    logQuranPages(parseInt(quranForm.pages) || 1, quranForm.surah, quranForm.notes);
+    setQuranForm({ pages: '', surah: '', notes: '' });
+    setShowQuranLog(false);
+  }
+
+  const statusColor = (status: string | undefined) =>
+    status === 'on-time' ? 'var(--green)' : status === 'late' ? 'var(--orange)' : status === 'missed' ? 'var(--red)' : 'var(--border)';
+  const statusLabel = (status: string | undefined) =>
+    status === 'on-time' ? '✓' : status === 'late' ? '!' : status === 'missed' ? '✗' : '–';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* ── Deen Score + 7-day grid ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+
+        {/* Score rings */}
+        <div className="card" style={{ background: 'linear-gradient(135deg, rgba(244,197,66,.07), var(--bg-2))' }}>
+          <div className="card-header"><div className="card-title">⭐ Deen Score</div><div style={{ fontSize: 22, fontWeight: 900, color: 'var(--gold)' }}>{deenScore}</div></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+            {[
+              { label: 'Salah', score: salahScore, color: 'var(--gold)' },
+              { label: 'Quran', score: quranScore, color: 'var(--green)' },
+              { label: 'Adhkar', score: adhkarScore, color: 'var(--cyan)' },
+            ].map(({ label, score, color }) => (
+              <div key={label}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                  <span style={{ color: 'var(--text-3)' }}>{label}</span>
+                  <span style={{ color, fontWeight: 700 }}>{score}%</span>
+                </div>
+                <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-4)' }}>
+                  <div style={{ height: '100%', width: `${score}%`, borderRadius: 3, background: color, transition: 'width .8s ease', boxShadow: score > 0 ? `0 0 6px ${color}` : undefined }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 7-day prayer mini-grid */}
+        <div className="card">
+          <div className="card-header"><div className="card-title">📅 7-Day Salah</div></div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+            {last7.map(day => (
+              <div key={day.date} style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 9, color: 'var(--text-3)', marginBottom: 3 }}>{day.label}</div>
+                <div style={{
+                  width: '100%', paddingBottom: '100%', borderRadius: 6, position: 'relative',
+                  background: day.onTime === 5 ? 'var(--gold)' : day.onTime >= 3 ? 'var(--green)' : day.logged > 0 ? 'var(--orange)' : 'var(--bg-4)',
+                  boxShadow: day.onTime === 5 ? '0 0 8px var(--gold)' : undefined,
+                }}>
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: day.logged > 0 ? '#000' : 'var(--text-3)' }}>
+                    {day.onTime || (day.logged > 0 ? day.logged : '')}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 8, textAlign: 'center' }}>
+            🟡 5/5 · 🟢 3-4 · 🟠 1-2 · ⬛ None
+          </div>
+        </div>
+      </div>
+
+      {/* ── Today's Salah ── */}
+      <div className="card" style={{ borderColor: allOnTime ? 'var(--gold)' : undefined }}>
+        <div className="card-header">
+          <div className="card-title">🕌 Today's Salah</div>
+          <div style={{ fontSize: 13, color: prayedCount === 5 ? 'var(--gold)' : 'var(--text-3)', fontWeight: 700 }}>
+            {prayedCount}/5 {allOnTime ? '🏆 All on time!' : ''}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+          {PRAYERS.map(prayer => {
+            const entry  = getPrayer(prayer);
+            const color  = statusColor(entry?.status);
+            return (
+              <div key={prayer} style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, marginBottom: 6, letterSpacing: 0.5 }}>{PRAYER_ICONS[prayer]}<br />{prayer}</div>
+                {/* Status badge */}
+                <div style={{
+                  padding: '4px 0', borderRadius: 8, marginBottom: 6,
+                  background: entry ? `${color}22` : 'var(--bg-4)',
+                  border: `1px solid ${entry ? color : 'var(--border)'}`,
+                  fontSize: 16, fontWeight: 700, color,
+                  boxShadow: entry?.status === 'on-time' ? `0 0 8px ${color}55` : undefined,
+                }}>
+                  {statusLabel(entry?.status)}
+                </div>
+                {/* 3 status buttons */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {(['on-time', 'late', 'missed'] as const).map(s => (
+                    <button key={s} onClick={() => logSalah(prayer, s)}
+                      style={{
+                        padding: '3px 0', fontSize: 9, borderRadius: 4, border: `1px solid ${entry?.status === s ? statusColor(s) : 'var(--border)'}`,
+                        background: entry?.status === s ? `${statusColor(s)}22` : 'var(--bg-4)',
+                        color: entry?.status === s ? statusColor(s) : 'var(--text-3)',
+                        cursor: 'pointer', fontWeight: entry?.status === s ? 700 : 400,
+                        transition: 'all .15s',
+                      }}>
+                      {s === 'on-time' ? '✓ On Time' : s === 'late' ? '~ Late' : '✗ Missed'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Quran + Adhkar (side by side) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+
+        {/* Quran Progress */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">📖 Quran</div>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowQuranLog(v => !v)}>+ Log</button>
+          </div>
+          {/* Progress ring */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <svg width="64" height="64" style={{ transform: 'rotate(-90deg)' }}>
+                <circle cx="32" cy="32" r="24" fill="none" stroke="var(--bg-4)" strokeWidth="6" />
+                <circle cx="32" cy="32" r="24" fill="none" stroke="var(--green)" strokeWidth="6"
+                  strokeDasharray={`${2 * Math.PI * 24 * quranPct / 100} ${2 * Math.PI * 24}`}
+                  strokeLinecap="round"
+                  style={{ transition: 'stroke-dasharray 1s ease', filter: quranPct > 0 ? 'drop-shadow(0 0 4px var(--green))' : undefined }} />
+              </svg>
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, color: 'var(--green)' }}>{quranPct}%</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>{totalPages}<span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 400 }}>/{QURAN_TOTAL_PAGES}p</span></div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Juz {juzDone}/30 complete</div>
+              <div style={{ fontSize: 11, color: 'var(--gold)' }}>Today: {todayPages}p</div>
+            </div>
+          </div>
+
+          {showQuranLog && (
+            <form onSubmit={submitQuran} style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div className="form-group"><label className="form-label">Pages</label><input type="number" className="form-input" placeholder="10" value={quranForm.pages} onChange={e => setQuranForm(f => ({ ...f, pages: e.target.value }))} required /></div>
+                <div className="form-group"><label className="form-label">Surah/Juz</label><input type="text" className="form-input" placeholder="Al-Baqarah..." value={quranForm.surah} onChange={e => setQuranForm(f => ({ ...f, surah: e.target.value }))} /></div>
+              </div>
+              <div className="form-group"><label className="form-label">Notes</label><input type="text" className="form-input" placeholder="Tajweed notes..." value={quranForm.notes} onChange={e => setQuranForm(f => ({ ...f, notes: e.target.value }))} /></div>
+              <button type="submit" className="btn btn-primary btn-full" style={{ fontSize: 12 }}>Log +{parseInt(quranForm.pages || '0') * 3} XP 📖</button>
+            </form>
+          )}
+        </div>
+
+        {/* Adhkar + Fasting */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Adhkar */}
+          <div className="card" style={{ flex: 1 }}>
+            <div className="card-header"><div className="card-title">🤲 Adhkar</div></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {([['morning', '🌅', 'Morning Adhkar', hasMorning], ['evening', '🌆', 'Evening Adhkar', hasEvening]] as const).map(([type, icon, label, done]) => (
+                <div key={type} onClick={() => !done && logDhikr(type)} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8,
+                  background: done ? 'rgba(110,231,183,.1)' : 'var(--bg-4)',
+                  border: `1px solid ${done ? 'var(--green)' : 'var(--border)'}`,
+                  cursor: done ? 'default' : 'pointer', transition: 'all .2s',
+                }}>
+                  <span style={{ fontSize: 20 }}>{icon}</span>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: done ? 'var(--text-3)' : 'var(--text-1)', textDecoration: done ? 'line-through' : undefined }}>{label}</span>
+                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: done ? 'var(--green)' : 'transparent', border: `2px solid ${done ? 'var(--green)' : 'var(--border)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, boxShadow: done ? '0 0 8px var(--green)' : undefined }}>
+                    {done ? '✓' : ''}
+                  </div>
+                </div>
+              ))}
+              <button className="btn btn-ghost btn-sm" onClick={() => logDhikr('custom')}>+ Custom Dhikr (+10 XP)</button>
+            </div>
+          </div>
+
+          {/* Fasting */}
+          <div className="card">
+            <div className="card-header"><div className="card-title">🌙 Fasting</div><span style={{ fontSize: 11, color: 'var(--gold)' }}>{totalFasts} total</span></div>
+            {todayFast ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', color: 'var(--gold)', fontWeight: 600, fontSize: 13 }}>
+                <span>🌟</span> Fast logged today · +50 XP
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <select className="form-select" style={{ marginBottom: 6, fontSize: 12 }} value={fastType} onChange={e => setFastType(e.target.value as any)}>
+                    <option value="monday">Monday</option>
+                    <option value="thursday">Thursday</option>
+                    <option value="ayyam-beedh">Ayyam al-Beedh (13-15)</option>
+                    <option value="other">Other Sunnah</option>
+                  </select>
+                  <input type="date" className="form-input" style={{ fontSize: 12 }} value={fastDate} onChange={e => setFastDate(e.target.value)} />
+                </div>
+                <button className="btn btn-secondary" style={{ fontSize: 11, padding: '8px 10px' }} onClick={() => logFast(fastDate, fastType)}>Log +50 XP</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Recent Quran log ── */}
+      {deen.quran.length > 0 && (
+        <div className="card">
+          <div className="card-header"><div className="card-title">📋 Recent Quran Sessions</div></div>
+          <table className="data-table">
+            <thead><tr><th>Date</th><th>Pages</th><th>Surah/Juz</th><th>XP</th></tr></thead>
+            <tbody>
+              {deen.quran.slice().reverse().slice(0, 7).map((q: any) => (
+                <tr key={q.id}>
+                  <td>{q.date}</td>
+                  <td style={{ color: 'var(--green)', fontWeight: 700 }}>{q.pages}p</td>
+                  <td style={{ fontSize: 11, color: 'var(--text-3)' }}>{q.surah || '—'}</td>
+                  <td style={{ color: 'var(--xp)', fontWeight: 600 }}>+{q.xpGained}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

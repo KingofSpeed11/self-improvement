@@ -13,6 +13,7 @@ const SECTIONS = [
   { id: 'reading',       icon: '📖', label: 'READING',  streakKey: 'reading' },
   { id: 'business',      icon: '💼', label: 'BIZ',      streakKey: 'business' },
   { id: 'discipline',    icon: '🎯', label: 'DISC',     streakKey: 'discipline' },
+  { id: 'deen',          icon: '🕌', label: 'DEEN',    streakKey: 'deen' },
   { id: 'analytics',     icon: '📊', label: 'STATS' },
   { id: 'achievements',  icon: '🏅', label: 'BADGES' },
   { id: 'skills',        icon: '🌳', label: 'SKILLS' },
